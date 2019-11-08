@@ -1,0 +1,304 @@
+<head>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.5.1/dist/leaflet.css"
+            integrity="sha512-xwE/Az9zrjBIphAcBb3F6JVqxf46+CDLwfLMHloNu6KEQCAWi6HcDUbeOfBIptF7tcCzusKFjFw2yuvEpDL9wQ=="
+            crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.5.1/dist/leaflet.js"
+            integrity="sha512-GffPMF3RvMeYyc1LWMHtK8EbPv0iNZ8/oTtHPx9/cc2ILxQ+u905qIwdpULaqDkyBKgOaB57QTMg7ztg8Jm2Og=="
+            crossorigin=""></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script src='https://npmcdn.com/@turf/turf/turf.min.js'></script>
+    <style>
+        body {
+            padding: 0%;
+            margin: 0%;
+        }
+    </style>
+</head>
+<body>
+    <div style="position: absolute; width: 100%; height: 100%; margin: 0%; padding: 0%; background-color: rgba(40, 48, 59, 1); color: rgba(255, 255, 255, 1);">
+        <div id='banner' style="position: absolute; width: 96%; height: 6%; left: 2%; top: 2%; background-color:rgba(241, 80,128); border: black solid 2px">
+            <!-- <button id='maria' style="position: absolute; width: 10%; right: 5%; top: 5%; height: 90%;">Maria</button> -->
+        </div>
+        <div id="map"
+            style="width: 96%; height: 86%; position: absolute; top: 10%; left: 2%; border: black solid 2px"></div>
+    </div>
+</body>
+<script>
+    let roadColor = ['#feebe2','#fbb4b9','#f768a1','#c51b8a','#7a0177']
+    let clrCat = 'btwn_cat'
+    // let clrCat = 'foot_traffic_cat' //something doesn't look right
+
+    // let removedEdges = [];
+    let toShelter = rosseauRoads = rosseauBuildings = null
+
+    let lat = 15.3061604, long = -61.3723493;
+
+    let shelterIcon = L.icon({
+        iconUrl: '../assets/sheltermarker.png',
+        iconSize: [42.057/2, 62.641/2],
+        iconAnchor: [42.057/4, 62.641/2],
+        popupAnchor: [0, -62.641/2]
+    })
+    
+    myMap = L.map('map',{
+        center: [lat, long],
+        minZoom: 11,
+        // maxZoom: 14,
+        zoom: 14
+    }).
+    on('zoomend', function(e){console.log(e.target._zoom)})
+
+    let chosenLayer = "https://api.mapbox.com/styles/v1/benjamin-a-ortiz/cjyivjffr0hel1cs1i3dki2ek/tiles/256/{z}/{x}/{y}?access_token=pk.eyJ1IjoiYmVuamFtaW4tYS1vcnRpeiIsImEiOiJjanIxMGZ2OWQwaml1NGFveG03YWRzMXlxIn0.NvqZp0gcf8rFC9Ani5D9Cw"
+    let mapLink = '<a>Map tiles by Mapbox Studio. Data by OpenStreetMap</a>'
+    L.tileLayer(chosenLayer, {
+            attribution: '&copy; ' + mapLink ,
+            maxZoom: 18,
+        }).addTo(myMap);
+
+    let drawnItems = new L.FeatureGroup();
+    myMap.addLayer(drawnItems);
+
+    let drawControl = new L.Control.Draw({
+        draw: {
+            polygon: false,
+            polyline: false,
+            circle: false,
+            circlemarker: false,
+            marker: false
+        }
+    });
+
+    myMap.addControl(drawControl);
+
+    myMap.on(L.Draw.Event.CREATED, function(event){
+        let latlngs = event.layer.getLatLngs()[0];
+        latlngs.push(latlngs[0])
+
+        let drawnRect = turf.polygon([latlngs.map(x => [x.lng, x.lat])])
+        let roadOverlap = rosseauRoads.getLayers().filter(x => turf.booleanContains(drawnRect, x.feature))
+        let edgeids = roadOverlap.map(function(l){
+            let edgeid = l.feature.properties.edge_id
+            myMap.removeLayer(l)
+            return(edgeid)
+        }).join('_')
+
+        axios.get(`http://localhost:8000/remove?edgeid=${edgeids}`)
+            .then(function(res){
+                // console.log('removed from backend')
+            })
+    });
+
+    d3.select('#maria')
+        .on('click', function(){
+
+            axios.get(`http://localhost:8000/removeMaria`)
+                .then(function(res){
+                    console.log(res);
+                    rosseauRoads
+                        .getLayers()
+                        .filter(x => res.data.indexOf(x.feature.properties.edge_id) >= 0)
+                        .map(function(l){
+                            myMap.removeLayer(l)
+                        })
+                })             
+        })
+    
+    function onRoadActions(d, l){
+        l
+        .on('click', function(){
+            // removedEdges.push(d.properties.edge_id)
+            axios.get(`http://localhost:8000/remove?edgeid=${d.properties.edge_id}`)
+                .then(function(res){
+                    myMap.removeLayer(l)
+                })   
+        })
+        .on('mouseover', function(){
+            // console.log(d.properties)
+            // console.log(roadColor[d.properties.foot_traffic_cat])
+            this.setStyle({
+                color: 'yellow',
+                weight: 8
+            })
+
+        })
+        .on('mouseout', function(){
+
+            this.setStyle({
+                color: roadColor[d.properties[clrCat]],
+                weight: 3
+            })
+
+        })
+    }
+
+    function colorRoads(d){
+        return({
+            "color": roadColor[d.properties[clrCat]],
+            "weight": 3,
+            "opacity": 1
+        })
+    }
+    function loadRoads(res){
+        let features = res.data.features
+
+        return(
+            L.geoJson(features, {
+                style: colorRoads,
+                onEachFeature: onRoadActions
+            })
+        )
+    }
+
+    function loadPath(res){
+        let features = res.data.features
+        return(
+            L.geoJson(features, {
+                style: {
+                    color: 'yellow',
+                    weight: 8,
+                    opacity: 1
+                },
+                onEachFeature: function(d,l){
+                    l.on('click', function(){
+                        myMap.removeLayer(toShelter)
+                    })   
+                }
+                
+            })
+        )
+    }
+
+    function onBuildingActions(d, l){
+        l
+        .on('click', function(){
+            // console.log(d)
+            // console.log(l)
+            let id = d.properties.closest_intersection
+            axios.get(`http://localhost:8000/closestShelter?id=${id}`)
+                    .then(function(res){
+                        // console.log(res)
+                        if(!!toShelter){myMap.removeLayer(toShelter)}
+
+                        if(res.data.type == "FeatureCollection"){
+                            toShelter = loadPath(res)
+                            myMap.addLayer(toShelter)
+                        } else {
+                            // console.log('destroy roads and color buildings red')
+                            rosseauBuildings
+                                .getLayers()
+                                .filter(x => res.data.trappedVertices.indexOf(x.feature.properties.closest_intersection) >= 0)
+                                .map(function(l){
+                                    l.setStyle({fillColor: 'red'})
+                                    l.feature.properties.removed = true
+                                })
+                            rosseauRoads
+                                .getLayers()
+                                .filter(x => res.data.trappedEdges.indexOf(x.feature.properties.edge_id) >= 0)
+                                .map(function(l){
+                                    myMap.removeLayer(l)
+                                })
+                        }   
+                    })
+        })
+        .on('mouseover', function(){
+            if(Object.keys(d.properties).indexOf('removed') < 0){
+            this.setStyle({
+                fillColor: 'yellow',
+            })
+            }
+        })
+        .on('mouseout', function(){
+            if(Object.keys(d.properties).indexOf('removed') < 0){
+            this.setStyle({
+                fillColor: 'grey'
+            })
+            }
+        })
+    }
+
+    function loadBuildings(res){
+        let features = res.data.features;
+        return(
+            L.geoJson(features, {
+                style: {
+                    "fillColor": 'grey',
+                    weight: 1,
+                    opacity: .9,
+                    color: 'black', 
+                    fillOpacity: .9
+                },
+                onEachFeature: onBuildingActions
+            })
+        )
+    }
+
+    function damageOverlay(res){
+        // console.log('damage overlay')
+        let feature = {
+            "type": 'Feature',
+            'properties': {
+                name: 'Hurricane Maria'
+            },
+            "geometry": res.data
+        }
+        return(
+            L.geoJson(feature, {style: {
+                fillColor: 'red',
+                weight: 1,
+                opacity: .9,
+                color: 'red',
+                fillOpacity: .9
+            }})
+        )
+    }
+
+    function loadShelters(res){
+        // console.log('shelters')
+        // console.log(res.data)
+        return(
+            // new L.GeoJSON(res.data).addTo(myMap)
+            new L.geoJson(res.data, {
+                pointToLayer: function(feature, latlng){
+                    return L.marker(latlng, {icon: shelterIcon})
+                },
+                onEachFeature: function(feature, layer){
+                    return layer.bindPopup(L.popup({autoClose: false, closeOnClick: null }).setContent(feature.properties.Name))
+                }
+            })
+            .addTo(myMap)
+        )
+    }
+
+    axios.all([
+        axios.get('http://localhost:8000/reset'),
+        axios.get("http://localhost:8000/getShape?name=allRoads"),
+        axios.get("http://localhost:8000/getShape?name=buildings"),
+        axios.get("http://localhost:8000/getShape?name=shelters"),
+        axios.get("http://localhost:8000/getShape?name=damagedAreas")
+    ])
+    .then(axios.spread(function(reset, allRoads, buildings, shelters, damagedAreas){   
+        allRoads.data.features = allRoads.data.features.map(function(x){
+            x.properties.singleSource = x.properties.singleSource.split('_')
+            return(x)
+        })
+
+        rosseauRoads = loadRoads(allRoads)
+        rosseauBuildings = loadBuildings(buildings)
+        rosseauShelter = loadShelters(shelters)
+        // rosseauDamage = damageOverlay(damagedAreas)
+
+        myMap
+            .addLayer(rosseauRoads)
+            .addLayer(rosseauBuildings)
+
+        L.control.layers({}, {'Damaged Areas': rosseauDamage}).addTo(myMap)
+
+        
+    }))
+
+
+
+</script>
